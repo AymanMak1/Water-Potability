@@ -1,0 +1,207 @@
+L'installation des packages nécessaires
+
+```{r}
+
+install.packages("FSelector")
+install.packages("party")
+install.packages("rpart.plot")
+install.packages("data.tree")
+install.packages("ggthemes")
+install.packages("rattle")
+```
+
+Le chargement des librairies nécessaire
+
+```{r}
+library(FSelector)
+library(rpart)
+library(caret)
+library(rpart.plot)
+library(data.tree)
+library(dplyr)
+library(caTools)
+
+library(randomForest)
+library(psych)
+library(pROC)
+library(Amelia)
+
+library(ggplot2)
+library(plotly)
+library(ggthemes)
+
+#library(rattle)
+```
+
+Importation et étude des données
+
+```{r}
+# Importer les donnée qui ont dans le fichier water_potability.csv qui est dans la même répertoire
+data <- read.csv("./water_potability.csv")
+
+# les premières observations des données
+head(data)
+
+# les dernières observations des données
+tail(data)
+
+# La structure des attributs
+str(data)
+
+# Statiques de bases sur l'ensemble des attributs
+summary(data)
+#describe(data)
+
+# Les valeurs non-observés pour chaque attribut
+missmap(data)
+
+table(data$Potability)
+```
+
+Pre-Processing, correction et nettoyage des données
+
+```{r}
+
+# generer une liste des indexes aléatoires
+shuffle_index <- sample(1:nrow(data))
+
+# On va utiliser ses indexes pour mélanger les donnée
+data <- data[shuffle_index, ]
+
+# Conversion de la variable cible d'une forme numérique au forme catégorielle 
+data <- mutate(data, Potability = factor(Potability, levels = c(0, 1), labels = c('No', 'Yes')))
+
+# Supprimer tout les observation avec des valeurs manquantes
+data <- na.omit(data)
+glimpse(data)
+
+```
+
+Divise les données entre données d'apprentissage et données de test
+
+```{r}
+# Les données sont divisées : 80% d'apprentissage, et 20% de test
+set.seed(123)
+sample = sample.split(data$Potability, SplitRatio = .80)
+
+# Données d'apprentissage
+train_data = subset(data, sample==TRUE)
+
+# Données de test
+test_data = subset(data, sample==FALSE)
+
+# Pourcentage de potabilité dans les données d'apprentissage et les données de test
+prop.table(table(train_data$Potability))
+prop.table(table(test_data$Potability))
+```
+
+Etudes d'ensemble des attributs des données
+
+```{r}
+# Importance des attributs
+# L'utilisation des forêts aléatoires juste pour visualiser l'importance de chaque variable
+
+rf_tmp <- randomForest(Potability ~ ., 
+                       data=train_data, ntree=1000, 
+                       keep.forest=FALSE, 
+                       importance=TRUE)
+
+# varImpPlot(rf_tmp, main = "Importance des variables")
+# importance(rf_tmp)
+
+# GGploot Plots
+ 
+feat_imp_df <- importance(rf_tmp) %>% 
+    data.frame() %>% 
+    mutate(feature = row.names(.)) 
+
+# Feature Importance Graph | MeanDecreaseAccuracy
+
+importanceAccuracyGraph <- ggplot(feat_imp_df, aes(x = reorder(feature, MeanDecreaseAccuracy), y = MeanDecreaseAccuracy)) +
+    geom_point() +
+    coord_flip() +
+    theme_classic() +
+    labs(
+      x     = "Feature",
+      y     = "Importance",
+      title = "Feature Importance Graph by MeanDecreaseAccuracy",
+      color="Feature"
+    )
+
+ggplotly(importanceAccuracyGraph)
+
+
+# Feature Importance Graph | MeanDecreaseGini
+
+importanceGiniGraph <- ggplot(feat_imp_df, aes(x = reorder(feature, MeanDecreaseGini), y = MeanDecreaseGini)) +
+    geom_point() +
+    coord_flip() +
+    theme_classic() +
+    labs(
+      x     = "Feature",
+      y     = "Importance",
+      title = "Feature Importance Graph by MeanDecreaseGini",
+      color="Feature"
+    )
+
+ggplotly(importanceGiniGraph)
+
+```
+
+Création du modèle d'arbre de décision avec les données d'apprentissage
+
+
+```{r}
+# Créattion du classifieur sur les donnée d'apprentissage
+tree <- rpart(Potability ~.,
+              data = train_data, 
+              method="class")
+
+```
+
+Prédiction avec l'arbre de décision sur les donnée de test
+
+```{r}
+
+# Prédiction sur les données de test
+tree.Potability.predicted <- predict(tree, test_data, type='class')
+
+# Calculer l'erreur de la prédiction sur les données de test
+tab <- table(tree.Potability.predicted, test_data$Potability)
+paste("Erreur sur le test_data :", round(1 - sum(diag(tab)) / sum(tab), digits = 2), "%")
+cat("\n")
+
+# Générer la courbe ROC
+#roc(test_data$Potability,
+#    as.numeric(tree.Potability.predicted), 
+ #   plot=TRUE, legacy.axes=TRUE, percent=TRUE, print.auc=TRUE)
+
+# Evaluer le modèle avec la matrice de confusion
+confusionMatrix(tree.Potability.predicted,test_data$Potability)
+```
+
+Visualisation de l'arbre de décision graphiquement
+
+```{r}
+
+# Visualisation de l'arbre de décision
+prp(tree)
+fancyRpartPlot(tree ,yesno=2,split.col="black",nn.col="black", 
+               caption="",palette="Set3",branch.col="black")
+
+#print(tree2)
+#plot(tree2)
+```   
+```{r}
+# Création d'une matrice de confusion manuellement pour comparer le pourcentage de succée et pourcentage d'échec
+prediction <- predict(tree, test_data, type = 'class')
+
+table_mat <- table(prediction, reference = test_data$Potability)
+table_mat
+  
+# Calcul de l'efficacité du modèle
+accuracy_test_data <- sum(diag(table_mat)) / sum(table_mat)
+cat("\n")
+print(paste('Accuracy for test_data', round(accuracy_test_data * 100, digits = 2), "%"))
+
+```
